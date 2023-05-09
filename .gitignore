@@ -8,6 +8,7 @@
 /test/
 /.original_env
 /env.sh
+*__pycache__/
 # data
 /data/*.tar.gz
 /data/input/*.bin
@@ -38,3 +39,6 @@
 !config/toyDetector_config.csv
 #plots 
 /plots
+#output of scanning scripts
+*.json
+*.txt
