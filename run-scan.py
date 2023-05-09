@@ -45,7 +45,10 @@ class Monitor:
     """
     Class for monitoring the status of the program being tested
     """
-    def __init__(self, opts: argparse.Namespace, cudaDevices: list = []):
+    def __init__(self, opts: argparse.Namespace, cudaDevices: Union[list,None] = None):
+        if cudaDevices is None:
+            cudaDevices = []
+
         self._intervalSeconds = opts.monitorSeconds
         self._monitorMemory = opts.monitorMemory
         self._monitorClock = opts.monitorClock
@@ -73,7 +76,7 @@ class Monitor:
         self._timeStamp.append(time.strftime("%y-%m-%d %H:%M:%S"))
 
         if self._monitorMemory or self._monitorUtilization:
-            proc = dict()
+            proc = {}
             if self._monitorMemory:
                 proc["rss"] = processRss(pid) if pid is not None else 0
             if self._monitorUtilization:
@@ -229,12 +232,17 @@ def _run(processUntil: list,
          opts: argparse.Namespace,
          logfilename: str,
          monitor: Monitor,
-         cudaDevices: list = []) -> Measurement:
+         cudaDevices: Union[list,None] = None) -> Measurement:
+    if cudaDevices is None:
+        cudaDevices = []
     nth = len(cores_main)
     with open(logfilename, "w") as logfile:
         taskset = []
         nvprof = []
-        command = [opts.program] + processUntil + ["--numberOfStreams", str(nstr), "--numberOfThreads", str(nth)] + opts.args
+        command = [opts.program] + \
+                processUntil + \
+                ["--numberOfStreams", str(nstr), "--numberOfThreads", str(nth)] + \
+                opts.args
         if opts.taskset:
             taskset = ["taskset", "-c", ",".join(cores_main)]
 
@@ -271,7 +279,8 @@ def _run(processUntil: list,
                 p.wait()
             break
         if p.returncode != 0:
-            raise Exception("Got return code %d, see output in the log file %s" % (p.returncode, logfilename))
+            raise Exception(f"Got return code {p.returncode},"
+                            f"see output in the log file {logfilename}")
     with open(logfilename) as logfile:
         return throughput(logfile, logfilename)
 
@@ -335,7 +344,8 @@ def getEventsPerStream(program: str, opts: argparse.Namespace) -> int:
     if ret is None and opts.runForMinutes < 0:
         tmp = n_blocks_per_stream.get(os.path.basename(program), None)
         if tmp is None:
-            raise Exception("No default number of event blocks for program %s, and --eventsPerStream was not given" % program)
+            raise Exception(f"No default number of event blocks for program {program},"
+                            f" and --eventsPerStream was not given")
         if isinstance(tmp, dict):
             if "--transfer" in opts.args:
                 eventBlocksPerStream = tmp["transfer"]
@@ -352,9 +362,9 @@ def main(opts: argparse.Namespace) -> None:
         ncores = opts.fill
 
     cudaDevices = listCudaDevices()
-    print("Found {} devices".format(len(cudaDevices)))
+    print(f"Found {len(cudaDevices)} devices")
     for i, d in cudaDevices.items():
-        print(" {} {} driver {}".format(i, d.name, d.driver_version))
+        print(f" {i} {d.name} driver {d.driver_version}")
 
     if len(opts.tasksetCores) > 0:
         cores = opts.tasksetCores[:]
@@ -422,22 +432,22 @@ def main(opts: argparse.Namespace) -> None:
 
         backgroundJobs = launchBackground(opts,
                                           cores_bkg,
-                                          opts.output+"_log_nstr{}_nth{}_bkg".format(nstr, nth)+"{}.txt")
+                                          opts.output+f"_log_nstr{nstr}_nth{nth}_bkg"+"{}.txt")
         if len(backgroundJobs) > 0:
             msg = "Background serial\n"
             for job in backgroundJobs:
-                msg += " pid {}".format(job.handle.pid)
+                msg += f" pid {job.handle.pid}"
                 if opts.taskset:
                     msg +=", running on cores " + ",".join(job.cores)
                 msg += "\n"
             printMessage(msg)
 
         try:
-            msg = "Number of streams {} threads {}".format(nstr, nth)
+            msg = f"Number of streams {nstr} threads {nth}"
             if nev >= 0:
-                msg += " events {}".format(nev)
+                msg += f" events {nev}"
             else:
-                msg += " minutes {}".format(mins)
+                msg += f" minutes {mins}"
             if opts.taskset:
                 msg += ", running on cores " + ",".join(cores_main)
             if len(opts.cudaDevices) > 0:
@@ -449,13 +459,15 @@ def main(opts: argparse.Namespace) -> None:
                 while tryAgain > 0:
                     try:
                         monitor = Monitor(opts, cudaDevices=opts.cudaDevices)
-                        measurement = run("_log_nstr{}_nth{}_n{}.txt".format(nstr, nth, i), monitor=monitor, cudaDevices=opts.cudaDevices)
+                        measurement = run(f"_log_nstr{nstr}_nth{nth}_n{i}.txt",
+                                          monitor=monitor,
+                                          cudaDevices=opts.cudaDevices)
                         break
                     except Exception as e:
                         tryAgain -= 1
                         if tryAgain == 0:
                             raise
-                        print("Got exception (see below), trying again ({} times left)".format(tryAgain))
+                        print(f"Got exception (see below), trying again ({tryAgain} times left)")
                         print("--------------------")
                         print(str(e))
                         print("--------------------")
@@ -475,7 +487,8 @@ def main(opts: argparse.Namespace) -> None:
                     d["monitor"]=monitor.toArrays()
                 if len(opts.cudaDevices) > 0:
                     d["cudaDevices"] = {
-                        x: dict(name=cudaDevices[x].name, driver_version=cudaDevices[x].driver_version) for x in opts.cudaDevices
+                        x: dict(name=cudaDevices[x].name,
+                                driver_version=cudaDevices[x].driver_version) for x in opts.cudaDevices
                     }
                 data["results"].append(d)
                 # Save results after each test
@@ -502,10 +515,11 @@ def main(opts: argparse.Namespace) -> None:
             thr = statistics.mean(throughputs)
             if len(throughputs) > 1:
                 stdev = statistics.stdev(throughputs)
-        printMessage(f"Number of streams {nstr} threads {nth}, average throughput {thr} stdev {stdev}")
+        printMessage(f"Number of streams {nstr} threads {nth},"
+                     f" average throughput {thr} stdev {stdev}")
         print()
         if stop:
-            print("Reached max wall time of %d s, stopping scan" % opts.stopAfterWallTime)
+            print(f"Reached max wall time of {opts.stopAfterWallTime} s, stopping scan")
             break
 
 
@@ -538,7 +552,8 @@ def addCommonArguments(parser: argparse.ArgumentParser) -> None:
     monitor_group.add_argument("--monitorUtilization", action="store_true",
                                help="Enable monitoring of CPU utilization with 'ps'")
     monitor_group.add_argument("--monitorCuda", action="store_true",
-                               help="Enable monitoring of CUDA devices (utilization, power, memory etc)")
+                               help=("Enable monitoring of CUDA devices"
+                                     " (utilization, power, memory etc)"))
 
     #
     parser.add_argument("--tryAgain", type=int, default=1,
@@ -645,7 +660,10 @@ Note that this program does not honor CUDA_VISIBLE_DEVICES, use --cudaDevices in
     if opts.tasksetCores != "":
         opts.tasksetCores = opts.tasksetCores.split(",")
     if len(opts.tasksetCores) > 0 and opts.fill != -1 and len(opts.tasksetCores) != opts.fill:
-        parser.error(f"When both --tasksetCores and --fill are given, --fill must match to the number of elements in --tasksetCores. No got --fill {opts.fill} and {len(opts.tasksetCores)} elements in --tasksetCores {opts.tasksetCores}")
+        parser.error(f"When both --tasksetCores and --fill are given, --fill must"
+                     f" match to the number of elements in --tasksetCores. No got"
+                     f" --fill {opts.fill} and {len(opts.tasksetCores)} elements"
+                     f" in --tasksetCores {opts.tasksetCores}")
     if opts.runForMinutes >= 0:
         if opts.eventsPerStream is not None:
             parser.error("--runForMinutes and --eventsPerStream can not be used together")

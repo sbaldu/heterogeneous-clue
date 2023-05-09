@@ -10,6 +10,7 @@ import statistics
 import subprocess
 import collections
 import multiprocessing
+from typing import Union
 import typing
 
 scan = importlib.import_module("run-scan")
@@ -31,7 +32,7 @@ class Program:
             # of valid options, otherwise raise an exception
             (name, value) = o.split("=")
             if name not in valid:
-                raise Exception("Unsupported option '{}'".format(name))
+                raise Exception(f"Unsupported option '{name}'")
             setattr(self, "_"+name, value)
             valid.remove(name)
         # The remaining valid options have not been specified, so set them to None
@@ -84,18 +85,18 @@ class Program:
             command.extend(["--maxEvents", str(self._events)])
         command.extend(["--numberOfThreads", str(self._threads),
                         "--numberOfStreams", str(self._streams)])
-        msg = "Program {} threads {} streams {}".format(self.programShort(),
-                                                        self._threads,
-                                                        self._streams)
+        msg = f"Program {self.programShort()} threads {self._threads} streams {self._streams}"
+
+
         if self._numa is not None:
-            command = ["numactl", "--cpunodebind={}".format(self._numa),
-                       "--membind={}".format(self._numa)] + command
-            msg += " NUMA node {}".format(self._numa)
+            command = ["numactl", f"--cpunodebind={self._numa}",
+                       f"--membind={self._numa}"] + command
+            msg += f" NUMA node {self._numa}"
         if self._cores is not None:
             command = ["taskset", "-c", self._cores] + command
-            msg += " cores {}".format(self._cores)
+            msg += f" cores {self._cores}"
         if len(self._cudaDevices) > 0:
-            msg += " CUDA devices {}".format(",".join(self._cudaDevices))
+            msg += f" CUDA devices {','.join(self._cudaDevices)}"
         return (command, msg)
 
     def makeEnv(self, logfile: typing.IO) -> dict:
@@ -128,7 +129,13 @@ class Program:
         return ret
 
 class Monitor:
-    def __init__(self, opts: argparse.Namespace, programs: list, cudaDevices: list = []):
+    def __init__(self,
+                 opts: argparse.Namespace,
+                 programs: list,
+                 cudaDevices: Union[list,None] = None):
+        if cudaDevices is None:
+            cudaDevices = []
+
         self._intervalSeconds = opts.monitorSeconds
         self._monitorMemory = opts.monitorMemory
         self._monitorClock = opts.monitorClock
@@ -212,9 +219,9 @@ def runMany(programs: list,
         msg = str(i) + " "+ msg
         # Append the number of minutes or number of events to the command message
         if opts.runForMinutes > 0:
-            msg += " minutes {}".format(opts.runForMinutes)
+            msg += f" minutes {opts.runForMinutes}"
         else:
-            msg += " events {}".format(prog.events())
+            msg += f" events {prog.events()}"
         # Print the current time and day, followed by the number of the program and
         # the options for it's execution
         scan.printMessage(msg)
@@ -256,10 +263,10 @@ def runMany(programs: list,
             scan.printMessage(f"Program {rp.index} finished")
             if rp.handle.returncode != 0:
                 print(f" got return code {rp.handle.returncode}, aborting test")
-                msg += "Program {} {} got return code {}, see output in log file {}, terminating the remaining programs.\n".format(rp.index,
-                                                                                                                                   rp.program.program(),
-                                                                                                                                   rp.handle.returncode,
-                                                                                                                                   logfilenamebase.format(rp.index))
+                msg += (f"Program {rp.index} {rp.program.program()} got return code"
+                        f" {rp.handle.returncode}, see output in log file"
+                        f" {logfilenamebase.format(rp.index)}, terminating"
+                        " the remaining programs.\n")
                 terminate_programs()
         except subprocess.TimeoutExpired:
             monitor.snapshot(running_programs)
@@ -309,15 +316,15 @@ def main(opts: argparse.Namespace) -> None:
     cudaDevicesInPrograms = list(cudaDevicesInPrograms)
 
     cudaDevicesAvailable = scan.listCudaDevices()
-    print("Found {} devices".format(len(cudaDevicesAvailable)))
+    print(f"Found {len(cudaDevicesAvailable)} devices")
     for i, d in cudaDevicesAvailable.items():
-        print(" {} {} driver {}".format(i, d.name, d.driver_version))
+        print(f" {i} {d.name} driver {d.driver_version}")
 
     # If any of the required cuda devices is not in the list of available devices, raise an
     # exception
     for d in cudaDevicesInPrograms:
         if d not in cudaDevicesAvailable:
-            raise Exception("Some program asked device {} but there is no device with that id".format(d))
+            raise Exception(f"Some program asked device {d} but there is no device with that id")
 
     # Create and fill the dict that will be written in the json file
     data = dict(
@@ -344,7 +351,7 @@ def main(opts: argparse.Namespace) -> None:
             tryAgain -= 1
             if tryAgain == 0:
                 raise
-            print("Got exception (see below), trying again ({} times left)".format(tryAgain))
+            print(f"Got exception (see below), trying again ({tryAgain} times left)")
             print("--------------------")
             print(str(e))
             print("--------------------")
